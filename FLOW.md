@@ -1,11 +1,11 @@
 # Execution & Application Flow (FLOW.md)
 
-> **Phase 1 Implementation Status: ACTUAL (Implemented & Verified)**
-> *Note: Phase 1 execution flows below reflect the actual code implementation. Subsequent feature phases remain PLANNED until implemented.*
+> **Implementation Status: ACTUAL (Phases 1 & 2 Implemented & Verified)**
+> *Note: Execution flows for Phase 1 (Foundation) and Phase 2 (Authentication & RBAC) reflect actual code implementation. Future phases remain PLANNED until implemented.*
 
 ---
 
-## 1. Actual Implemented Execution Flows (Phase 1)
+## 1. Actual Implemented Execution Flows (Phases 1 & 2)
 
 ### Flow 1: Frontend Startup Flow (ACTUAL)
 
@@ -25,7 +25,7 @@
         +---> Wraps layout with <BrowserRouter> from 'react-router-dom'
         +---> Defines <Routes> matching path="/" to <Home />
         |
-        v Displays initial responsive UI badge: "● React + Vite + Tailwind CSS Active"
+        v Displays responsive UI badge: "● React + Vite + Tailwind CSS Active"
 ```
 
 **Actual Code Execution Path**:
@@ -61,94 +61,173 @@
 
 ---
 
-### Flow 3: Health API Execution Flow (ACTUAL)
+### Flow 3: Health Check API Flow (ACTUAL)
 
 ```
 [ HTTP Client (Browser / Postman / Invoke-RestMethod) ]
         |
         v Sends request: GET http://localhost:5000/api/health
-[ server/server.js ]
-        |
-        v Passes request to Express App instance
 [ server/src/app.js ]
         |
-        +---> Middleware: cors() (Validates CORS origin)
-        +---> Middleware: express.json() (Parses JSON body if present)
+        +---> Middleware: cors() (Validates origin)
+        +---> Middleware: express.json() (Parses JSON body)
         +---> Router delegate: app.use('/api', healthRoutes)
         |
         v Matched route path: /health
 [ server/src/routes/health.routes.js ]
         |
-        v Invokes controller action: router.get('/health', getHealthStatus)
+        v Invokes controller: router.get('/health', getHealthStatus)
 [ server/src/controllers/health.controller.js ]
         |
         v Function: getHealthStatus(req, res)
         |
-        +---> Formats JSON payload:
-              {
-                "status": "ok",
-                "message": "API is running successfully",
-                "timestamp": "2026-09-18T...",
-                "environment": "development"
-              }
-        |
-        v Responds with HTTP status code 200 OK
+        v Responds with HTTP status code 200 OK + JSON payload
 ```
 
 **Actual Code Execution Path**:
 - Entry: `GET /api/health`
-- Route: `server/src/routes/health.routes.js` (Route: `router.get('/health', getHealthStatus)`)
-- Controller: `server/src/controllers/health.controller.js` (Function: `getHealthStatus(req, res)`)
-- Middleware: `server/src/middleware/errorHandler.js` (Functions: `notFoundHandler`, `errorHandler`)
+- Route: `server/src/routes/health.routes.js` (`router.get('/health', getHealthStatus)`)
+- Controller: `server/src/controllers/health.controller.js` (`getHealthStatus(req, res)`)
 
 ---
 
-### Flow 4: Database Startup & Connection Check Flow (ACTUAL)
+### Flow 4: User Registration Flow (ACTUAL)
 
 ```
-[ server/server.js ]
+[ Client / Postman ]
         |
-        v Invokes: await testDbConnection() during startServer()
-[ server/src/config/db.js ]
+        v Sends: POST /api/auth/register { "name": "...", "email": "...", "password": "..." }
+[ server/src/routes/auth.routes.js ]
         |
-        +---> Evaluates process.env.DATABASE_URL
+        v Route handler: router.post('/register', register)
+[ server/src/controllers/auth.controller.js ]
         |
-        +--- IF DATABASE_URL is missing:
-        |      +--> Logs: "⚠️  DATABASE_URL environment variable is not set."
-        |      +--> Returns: false
+        v Function: register(req, res, next)
         |
-        +--- IF DATABASE_URL is present:
-               +--> Invokes: pool.query('SELECT NOW() as current_time, current_database() as db_name')
-               +--> SUCCESS:
-               |      +--> Logs: "✅ Database connection successful!"
-               |      +--> Logs database name and database timestamp
-               |      +--> Returns: true
-               +--> FAILURE:
-                      +--> Catches error
-                      +--> Logs: "❌ Database connection failed!" with error.message
-                      +--> Returns: false
+        +---> Step 1: Validates inputs (Name >= 2 chars, Email regex check, Password >= 6 chars)
+        +---> Step 2: Normalizes email -> email.trim().toLowerCase()
+        +---> Step 3: Queries DB -> SELECT id FROM users WHERE email = $1
+        |             (If exists: Returns 409 Conflict)
+        +---> Step 4: Hashes password -> await bcrypt.hash(password, 10)
+        +---> Step 5: Inserts into DB with enforced role='user':
+        |             INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'user')
+        +---> Step 6: Returns 201 Created with safe user details (id, name, email, role, createdAt)
 ```
 
 **Actual Code Execution Path**:
-- File: `server/src/config/db.js` (Pool instance: `new Pool({ connectionString })`, Function: `testDbConnection()`)
+- Route: `server/src/routes/auth.routes.js` (`router.post('/register', register)`)
+- Controller: `server/src/controllers/auth.controller.js` (Function: `register(req, res, next)`)
+- Database Service: `server/src/config/db.js` (Function: `query()`)
 
 ---
 
-## 2. Planned Application Flows (Phase 2+)
+### Flow 5: User Login & JWT Generation Flow (ACTUAL)
+
+```
+[ Client / Postman ]
+        |
+        v Sends: POST /api/auth/login { "email": "...", "password": "..." }
+[ server/src/routes/auth.routes.js ]
+        |
+        v Route handler: router.post('/login', login)
+[ server/src/controllers/auth.controller.js ]
+        |
+        v Function: login(req, res, next)
+        |
+        +---> Step 1: Validates presence of email & password
+        +---> Step 2: Normalizes email -> email.trim().toLowerCase()
+        +---> Step 3: Queries DB -> SELECT id, name, email, password_hash, role FROM users WHERE email = $1
+        |             (If not found: Returns 401 Unauthorized "Invalid email or password")
+        +---> Step 4: Compares password hash -> await bcrypt.compare(password, user.password_hash)
+        |             (If mismatch: Returns 401 Unauthorized "Invalid email or password")
+        +---> Step 5: Generates signed JWT -> jwt.sign({ userId, email, role }, JWT_SECRET, { expiresIn: '24h' })
+        +---> Step 6: Returns 200 OK with token and user profile object
+```
+
+**Actual Code Execution Path**:
+- Route: `server/src/routes/auth.routes.js` (`router.post('/login', login)`)
+- Controller: `server/src/controllers/auth.controller.js` (Function: `login(req, res, next)`)
+- Security: `bcrypt.compare()`, `jwt.sign()`
+
+---
+
+### Flow 6: JWT Authentication Middleware Flow (ACTUAL)
+
+```
+[ Protected HTTP Request ]
+        |
+        v Header: Authorization: Bearer <token>
+[ server/src/middleware/authMiddleware.js ]
+        |
+        v Middleware function: authenticateToken(req, res, next)
+        |
+        +---> Step 1: Checks header presence (If missing: Returns 401 "Authentication token required")
+        +---> Step 2: Validates "Bearer <token>" format (If malformed: Returns 401 "Malformed authorization header")
+        +---> Step 3: Verifies JWT signature using process.env.JWT_SECRET via jwt.verify()
+        |             (If expired/invalid: Returns 401 "Invalid or expired authentication token")
+        +---> Step 4: Decodes token payload into req.user = { userId, email, role }
+        +---> Step 5: Calls next() to pass control to target route/controller
+```
+
+**Actual Code Execution Path**:
+- Middleware: `server/src/middleware/authMiddleware.js` (Function: `authenticateToken(req, res, next)`)
+
+---
+
+### Flow 7: Role-Based Authorization Middleware Flow (ACTUAL)
+
+```
+[ Request passed from authenticateToken ]
+        |
+        v Target route requires role (e.g. requireRole('admin'))
+[ server/src/middleware/rbacMiddleware.js ]
+        |
+        v Middleware function wrapper: requireRole(...allowedRoles)(req, res, next)
+        |
+        +---> Step 1: Asserts req.user exists (If missing: Returns 401)
+        +---> Step 2: Checks if allowedRoles.includes(req.user.role)
+        |             - IF req.user.role === 'admin': Calls next()
+        |             - IF req.user.role !== 'admin': Returns 403 Forbidden
+        |               {"status": "error", "statusCode": 403, "message": "Access forbidden..."}
+```
+
+**Actual Code Execution Path**:
+- Middleware: `server/src/middleware/rbacMiddleware.js` (Function: `requireRole(...allowedRoles)`)
+
+---
+
+### Flow 8: Get Current User Profile Flow (ACTUAL)
+
+```
+[ Client Request ]
+        |
+        v GET /api/auth/me (Header: Authorization: Bearer <valid_jwt>)
+[ server/src/routes/auth.routes.js ]
+        |
+        +---> Executing middleware: authenticateToken
+        |     (Populates req.user = { userId, email, role })
+        |
+        v Delegate to controller: router.get('/me', authenticateToken, getMe)
+[ server/src/controllers/auth.controller.js ]
+        |
+        v Function: getMe(req, res, next)
+        |
+        +---> Queries DB: SELECT id, name, email, role, created_at, updated_at FROM users WHERE id = $1
+        +---> Returns 200 OK with safe user details (excluding password_hash)
+```
+
+**Actual Code Execution Path**:
+- Route: `server/src/routes/auth.routes.js` (`router.get('/me', authenticateToken, getMe)`)
+- Middleware: `server/src/middleware/authMiddleware.js` (`authenticateToken`)
+- Controller: `server/src/controllers/auth.controller.js` (`getMe(req, res, next)`)
+
+---
+
+## 2. Planned Application Flows (Phase 3+)
 
 > **Status: PLANNED (Not yet implemented)**
 
-### User & Admin Application Flow (Planned)
-```
-[ Visitor Landing ] ---> [ Browse Catalog ] ---> [ View Product Detail ] ---> [ Add to Cart ]
-                                                                                   |
-                                                                                   v
-[ Order History / Status Tracking ] <--- [ Order Created ] <--- [ Checkout ] <----+
-```
-
-### Planned Database Schema Architecture (`server/src/db/schema.sql`)
-- Table `users`: `id`, `name`, `email`, `password_hash`, `role` (`user` | `admin`), `created_at`, `updated_at`
-- Table `products`: `id`, `name`, `description`, `price`, `image_url`, `category`, `stock`, `created_at`, `updated_at`
-- Table `cart_items`: `id`, `user_id`, `product_id`, `quantity`, `created_at`, `updated_at`, `CONSTRAINT uk_user_product UNIQUE (user_id, product_id)`
-- Table `orders`: `id`, `user_id`, `total_amount`, `shipping_address`, `status` (`PENDING`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`), `created_at`, `updated_at`
-- Table `order_items`: `id`, `order_id`, `product_id`, `quantity`, `price_at_purchase`
+- Product Management CRUD (`POST /api/products`, `PUT /api/products/:id`, `DELETE /api/products/:id`)
+- Cart Sync Operations (`GET /api/cart`, `POST /api/cart`, `DELETE /api/cart/:id`)
+- Transactional Order Checkout (`POST /api/orders`)
+- Admin Order Management (`GET /api/orders`, `PATCH /api/orders/:id/status`)
