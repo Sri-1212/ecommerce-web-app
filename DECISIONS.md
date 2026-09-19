@@ -119,3 +119,67 @@ This document details the architectural, technical, and operational design choic
 - **Alternatives considered**: Accepting optional `role` parameter in `POST /api/auth/register` payload.
 - **Why this approach**: Hardcoding `role = 'user'` on public registration guarantees no external client can grant themselves `admin` privileges. Admin accounts can only be created via seed scripts or direct database management.
 - **Trade-offs**: Admin role promotion cannot be requested through standard public registration endpoints.
+
+---
+
+## 4. Phase 3 Implementation Decision Log (Product Catalog & Admin Management)
+
+### Decision 19: Product API Route & Controller Structure (`product.routes.js` & `product.controller.js`)
+- **Context**: Structuring product catalog and admin management REST APIs inside the Express backend.
+- **Alternatives considered**: Merging product handlers into `app.js` or creating an overly complex repository/service layer.
+- **Why this approach**: Keeps backend modular and easy to navigate following existing `routes/` and `controllers/` patterns (`server/src/routes/product.routes.js` and `server/src/controllers/product.controller.js`).
+- **Trade-offs**: Controllers directly call the database query helper `query()`, which keeps code simple and DRY without premature service abstractions.
+
+### Decision 20: Public Read vs. Admin-Only Write Authorization Model
+- **Context**: Enforcing REST API access control for product reading and mutation operations.
+- **Alternatives considered**: Requiring authentication for catalog reading, or allowing authenticated non-admin users to update products.
+- **Why this approach**: `GET /api/products` and `GET /api/products/:id` are public to allow unauthenticated browsing. Write endpoints (`POST`, `PUT`, `DELETE`) require `authenticateToken` followed by `requireRole('admin')` middleware.
+- **Trade-offs**: Backend strictly enforces the authorization boundary regardless of frontend client state.
+
+### Decision 21: Strict Input Validation & Sanitization in Controller Layer
+- **Context**: Validating product input fields (`name`, `description`, `price`, `image_url`, `category`, `stock`) for POST and PUT requests.
+- **Alternatives considered**: Relying solely on database constraints or frontend validation.
+- **Why this approach**: Centralized validation in `validateProductInput()` ensures required fields (`name`, `category`, `price`, `stock`) meet constraints (non-negative price/stock, length bounds) before touching the database.
+- **Trade-offs**: Manual validation logic written in JS controller; provides clear, user-friendly 400 error responses.
+
+### Decision 22: Parameterized SQL Queries (`$1`, `$2`, ...) for All Product Operations
+- **Context**: Executing product CRUD operations securely against PostgreSQL database.
+- **Alternatives considered**: String interpolation or concatenation in SQL statements.
+- **Why this approach**: Using parameterized queries (`INSERT INTO products ... VALUES ($1, $2, ...)`) guarantees protection against SQL injection attacks.
+- **Trade-offs**: Requires explicit parameter array indexing matching SQL positional placeholders.
+
+### Decision 23: Product Ordering Strategy (`ORDER BY id DESC`)
+- **Context**: Specifying default sort order for product list API responses (`GET /api/products`).
+- **Alternatives considered**: Sorting by `created_at DESC` or `name ASC` or non-deterministic ordering.
+- **Why this approach**: `ORDER BY id DESC` ensures newest products appear first while providing deterministic, index-friendly pagination baseline.
+- **Trade-offs**: Does not account for dynamic popularity/sales sorting, which can be introduced in future search/filtering phases.
+
+### Decision 24: Graceful Image URL Handling with UI Fallbacks
+- **Context**: Storing and rendering product images across catalog and details views.
+- **Alternatives considered**: Uploading binary files directly to database or local disk storage.
+- **Why this approach**: Product schema stores URL text (`image_url`). Frontend components (`ProductCard`, `ProductDetailsPage`) validate image loading and display high-quality fallback artwork when URLs are empty or fail to load.
+- **Trade-offs**: Relies on external image URLs or CDNs rather than native multipart file uploads.
+
+### Decision 25: Centralized Frontend API Service Layer (`productService.js`)
+- **Context**: Abstracting HTTP fetch calls for product endpoints in the React client.
+- **Alternatives considered**: Writing raw `fetch` calls inline inside React page components.
+- **Why this approach**: `client/src/services/productService.js` encapsulates API URLs, JSON parsing, error throwing, and automatic `Authorization` token header attachment.
+- **Trade-offs**: Requires maintaining service functions alongside page components.
+
+### Decision 26: Dual-Layer Admin Frontend Route Protection (`ProtectedRoute.jsx`)
+- **Context**: Protecting administrative UI routes (`/admin/products`, `/admin/products/new`, `/admin/products/:id/edit`).
+- **Alternatives considered**: Relying solely on hidden navigation links or strictly backend protection.
+- **Why this approach**: `ProtectedRoute` checks `useAuth()` session state and `isAdmin` flag on the client to redirect unauthenticated or non-admin users, providing optimal UX while backend remains the real security boundary.
+- **Trade-offs**: Requires client route wrapper components and session restoration logic.
+
+### Decision 27: Protected Product Deletion Behavior & Historical Order Integrity
+- **Context**: Handling `DELETE /api/products/:id` when products are referenced in foreign-key tables (`cart_items` and `order_items`).
+- **Alternatives considered**: Blind `DELETE` query or cascading deletion of historical order records (`ON DELETE CASCADE` on `order_items`).
+- **Why this approach**: In `schema.sql`, `order_items` references `products(id)` with `ON DELETE RESTRICT`. Before executing deletion, controller checks if product exists in `order_items`. If referenced, returns HTTP 409 Conflict explaining that deletion is blocked to preserve customer order history, advising stock unlisting instead.
+- **Trade-offs**: Products with purchase history cannot be hard-deleted from database, maintaining financial and historical accuracy.
+
+### Decision 28: Standardized JSON Error Payload Format Across Backend
+- **Context**: Returning consistent error details for invalid IDs (400), non-existent products (404), unauthorized requests (401/403), and constraint conflicts (409).
+- **Alternatives considered**: Returning plain text strings or variable JSON keys.
+- **Why this approach**: All endpoints return uniform `{ status: 'error', statusCode: N, message: '...' }` payloads, enabling frontend services and components to render clean `ErrorMessage` components.
+- **Trade-offs**: Requires disciplined response formatting across all controller handlers.

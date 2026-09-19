@@ -1,11 +1,11 @@
 # Execution & Application Flow (FLOW.md)
 
-> **Implementation Status: ACTUAL (Phases 1 & 2 Implemented & Verified)**
-> *Note: Execution flows for Phase 1 (Foundation) and Phase 2 (Authentication & RBAC) reflect actual code implementation. Future phases remain PLANNED until implemented.*
+> **Implementation Status: ACTUAL (Phases 1, 2 & 3 Implemented & Verified)**
+> *Note: Execution flows for Phase 1 (Foundation), Phase 2 (Authentication & RBAC), and Phase 3 (Product Catalog & Admin Management) reflect actual code implementation. Future phases remain PLANNED until implemented.*
 
 ---
 
-## 1. Actual Implemented Execution Flows (Phases 1 & 2)
+## 1. Actual Implemented Execution Flows (Phases 1, 2 & 3)
 
 ### Flow 1: Frontend Startup Flow (ACTUAL)
 
@@ -22,11 +22,248 @@
         v Renders component hierarchy
 [ client/src/App.jsx ]
         |
-        +---> Wraps layout with <BrowserRouter> from 'react-router-dom'
-        +---> Defines <Routes> matching path="/" to <Home />
-        |
-        v Displays responsive UI badge: "● React + Vite + Tailwind CSS Active"
+        +---> Wraps layout with <AuthProvider> and <BrowserRouter>
+        +---> Renders <Navbar /> header
+        +---> Defines <Routes> for public catalog and protected admin pages
 ```
+
+---
+
+### Flow 9: Product List Flow (ACTUAL)
+
+```
+[ Browser Client ]
+        |
+        v User navigates to /products
+[ client/src/pages/ProductsPage.jsx ]
+        |
+        +---> Triggers useEffect() -> calls fetchProductsList()
+        |
+        v Service call: getProducts()
+[ client/src/services/productService.js ]
+        |
+        v Sends HTTP Request: GET /api/products
+[ server/src/routes/product.routes.js ]
+        |
+        v Route handler: router.get('/', getAllProducts)
+[ server/src/controllers/product.controller.js ]
+        |
+        v Function: getAllProducts(req, res, next)
+        |
+        +---> Queries DB via query(): SELECT id, name, description, price, image_url, category, stock, created_at, updated_at FROM products ORDER BY id DESC
+        +---> PostgreSQL / Fallback Store returns row array
+        +---> Responds with HTTP 200 OK { status: 'success', data: { products } }
+[ client/src/pages/ProductsPage.jsx ]
+        |
+        v Updates state setProducts(products)
+        v Renders responsive grid of <ProductCard /> components
+```
+
+**Actual Code Execution Path**:
+- Page: `client/src/pages/ProductsPage.jsx` (Function: `fetchProductsList()`)
+- Service: `client/src/services/productService.js` (Function: `getProducts()`)
+- Route: `server/src/routes/product.routes.js` (`router.get('/', getAllProducts)`)
+- Controller: `server/src/controllers/product.controller.js` (Function: `getAllProducts(req, res, next)`)
+- Component: `client/src/components/ProductCard.jsx`
+
+---
+
+### Flow 10: Product Details Flow (ACTUAL)
+
+```
+[ Browser Client ]
+        |
+        v User clicks "View Details" or navigates to /products/:id
+[ client/src/pages/ProductDetailsPage.jsx ]
+        |
+        +---> Reads id from useParams()
+        +---> Triggers useEffect() -> calls getProductById(id)
+[ client/src/services/productService.js ]
+        |
+        v Sends HTTP Request: GET /api/products/:id
+[ server/src/routes/product.routes.js ]
+        |
+        v Route handler: router.get('/:id', getProductById)
+[ server/src/controllers/product.controller.js ]
+        |
+        v Function: getProductById(req, res, next)
+        |
+        +---> Step 1: Validates parsePositiveInt(req.params.id) (If invalid: returns 400)
+        +---> Step 2: Queries DB: SELECT id, name, description, price, image_url, category, stock, created_at, updated_at FROM products WHERE id = $1
+        |             (If not found: returns 404 Not Found)
+        +---> Step 3: Returns HTTP 200 OK { status: 'success', data: { product } }
+[ client/src/pages/ProductDetailsPage.jsx ]
+        |
+        v Renders image, full details, price, category tag, stock badge, and metadata
+```
+
+**Actual Code Execution Path**:
+- Page: `client/src/pages/ProductDetailsPage.jsx` (Function: `fetchDetails()`)
+- Service: `client/src/services/productService.js` (Function: `getProductById(id)`)
+- Route: `server/src/routes/product.routes.js` (`router.get('/:id', getProductById)`)
+- Controller: `server/src/controllers/product.controller.js` (Function: `getProductById(req, res, next)`)
+
+---
+
+### Flow 11: Admin Create Product Flow (ACTUAL)
+
+```
+[ Browser Client ]
+        |
+        v Admin submits form at /admin/products/new
+[ client/src/pages/AdminProductFormPage.jsx ]
+        |
+        +---> Step 1: Runs frontend validation validateFrontend()
+        +---> Step 2: Calls service createProduct(payload)
+[ client/src/services/productService.js ]
+        |
+        v Sends HTTP Request: POST /api/products (Header: Authorization: Bearer <admin_token>)
+[ server/src/routes/product.routes.js ]
+        |
+        +---> Executing Middleware 1: authenticateToken (Verifies JWT, sets req.user = { userId, email, role })
+        +---> Executing Middleware 2: requireRole('admin') (Verifies req.user.role === 'admin')
+        |
+        v Delegates to controller: router.post('/', authenticateToken, requireRole('admin'), createProduct)
+[ server/src/controllers/product.controller.js ]
+        |
+        v Function: createProduct(req, res, next)
+        |
+        +---> Step 1: Runs validateProductInput(req.body) (Checks required fields, types, price >= 0, stock >= 0)
+        +---> Step 2: Executes parameterized SQL: INSERT INTO products (name, description, price, image_url, category, stock) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+        +---> Step 3: Returns HTTP 201 Created { status: 'success', data: { product } }
+[ client/src/pages/AdminProductFormPage.jsx ]
+        |
+        v Displays success banner and navigates to /admin/products
+```
+
+**Actual Code Execution Path**:
+- Page: `client/src/pages/AdminProductFormPage.jsx` (Function: `handleSubmit(e)`)
+- Service: `client/src/services/productService.js` (Function: `createProduct(productData)`)
+- Security: `server/src/middleware/authMiddleware.js`, `server/src/middleware/rbacMiddleware.js`
+- Route: `server/src/routes/product.routes.js` (`router.post('/', authenticateToken, requireRole('admin'), createProduct)`)
+- Controller: `server/src/controllers/product.controller.js` (Function: `createProduct(req, res, next)`)
+
+---
+
+### Flow 12: Admin Update Product Flow (ACTUAL)
+
+```
+[ Browser Client ]
+        |
+        v Admin submits edited form at /admin/products/:id/edit
+[ client/src/pages/AdminProductFormPage.jsx ]
+        |
+        +---> Calls service updateProduct(id, payload)
+[ client/src/services/productService.js ]
+        |
+        v Sends HTTP Request: PUT /api/products/:id (Header: Authorization: Bearer <admin_token>)
+[ server/src/routes/product.routes.js ]
+        |
+        +---> Middleware 1: authenticateToken
+        +---> Middleware 2: requireRole('admin')
+        |
+        v Delegate: router.put('/:id', authenticateToken, requireRole('admin'), updateProduct)
+[ server/src/controllers/product.controller.js ]
+        |
+        v Function: updateProduct(req, res, next)
+        |
+        +---> Step 1: Validates parsePositiveInt(req.params.id)
+        +---> Step 2: Verifies product existence: SELECT id FROM products WHERE id = $1 (If missing: returns 404)
+        +---> Step 3: Validates input fields validateProductInput(req.body)
+        +---> Step 4: Executes parameterized SQL: UPDATE products SET name = $1, description = $2, price = $3, image_url = $4, category = $5, stock = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *
+        +---> Step 5: Returns HTTP 200 OK { status: 'success', data: { product } }
+[ client/src/pages/AdminProductFormPage.jsx ]
+        |
+        v Displays success feedback and redirects to /admin/products
+```
+
+**Actual Code Execution Path**:
+- Page: `client/src/pages/AdminProductFormPage.jsx` (Function: `handleSubmit(e)`)
+- Service: `client/src/services/productService.js` (Function: `updateProduct(id, productData)`)
+- Route: `server/src/routes/product.routes.js` (`router.put('/:id', authenticateToken, requireRole('admin'), updateProduct)`)
+- Controller: `server/src/controllers/product.controller.js` (Function: `updateProduct(req, res, next)`)
+
+---
+
+### Flow 13: Admin Delete Product Flow (ACTUAL)
+
+```
+[ Browser Client ]
+        |
+        v Admin clicks "Delete" on product row & confirms modal at /admin/products
+[ client/src/pages/AdminProductsPage.jsx ]
+        |
+        v Calls service deleteProduct(id)
+[ client/src/services/productService.js ]
+        |
+        v Sends HTTP Request: DELETE /api/products/:id (Header: Authorization: Bearer <admin_token>)
+[ server/src/routes/product.routes.js ]
+        |
+        +---> Middleware 1: authenticateToken
+        +---> Middleware 2: requireRole('admin')
+        |
+        v Delegate: router.delete('/:id', authenticateToken, requireRole('admin'), deleteProduct)
+[ server/src/controllers/product.controller.js ]
+        |
+        v Function: deleteProduct(req, res, next)
+        |
+        +---> Step 1: Validates parsePositiveInt(req.params.id)
+        +---> Step 2: Checks existence SELECT id FROM products WHERE id = $1 (If missing: returns 404)
+        +---> Step 3: Inspects order history reference SELECT COUNT(*) FROM order_items WHERE product_id = $1
+        |             (If count > 0: Returns HTTP 409 Conflict protecting historical order integrity)
+        +---> Step 4: Executes DELETE FROM products WHERE id = $1
+        +---> Step 5: Returns HTTP 200 OK { status: 'success', data: { id } }
+[ client/src/pages/AdminProductsPage.jsx ]
+        |
+        v Shows notice banner and refreshes product table fetchAdminProducts()
+```
+
+**Actual Code Execution Path**:
+- Page: `client/src/pages/AdminProductsPage.jsx` (Function: `handleExecuteDelete()`)
+- Service: `client/src/services/productService.js` (Function: `deleteProduct(id)`)
+- Route: `server/src/routes/product.routes.js` (`router.delete('/:id', authenticateToken, requireRole('admin'), deleteProduct)`)
+- Controller: `server/src/controllers/product.controller.js` (Function: `deleteProduct(req, res, next)`)
+
+---
+
+### Flow 14: Admin Authorization Flow (ACTUAL)
+
+```
+[ Protected Admin HTTP Request ]
+        |
+        v HTTP Request (e.g. POST /api/products) Header: Authorization: Bearer <token>
+[ server/src/middleware/authMiddleware.js ]
+        |
+        v authenticateToken(req, res, next)
+        |---> Verifies JWT signature via jwt.verify(token, JWT_SECRET)
+        |---> Attaches decoded user payload to req.user = { userId, email, role }
+        |---> Calls next()
+        |
+[ server/src/middleware/rbacMiddleware.js ]
+        |
+        v requireRole('admin')(req, res, next)
+        |---> Asserts req.user exists
+        |---> Checks allowedRoles.includes(req.user.role)
+        |     - IF req.user.role === 'admin': Calls next() -> Controller executes
+        |     - IF req.user.role === 'user': Responds HTTP 403 Forbidden ("Access forbidden. Required role: [admin]...")
+        |     - IF token missing or invalid: Responds HTTP 401 Unauthorized
+```
+
+**Actual Code Execution Path**:
+- Security Pipeline: `authenticateToken` -> `requireRole('admin')` -> Controller Handler
+- Middleware 1: `server/src/middleware/authMiddleware.js` (`authenticateToken`)
+- Middleware 2: `server/src/middleware/rbacMiddleware.js` (`requireRole('admin')`)
+
+---
+
+## 2. Planned Application Flows (Phase 4+)
+
+> **Status: PLANNED (Not yet implemented)**
+
+- Cart Sync Operations (`GET /api/cart`, `POST /api/cart`, `DELETE /api/cart/:id`)
+- Transactional Order Checkout (`POST /api/orders`)
+- Admin Order Management (`GET /api/orders`, `PATCH /api/orders/:id/status`)
+
 
 **Actual Code Execution Path**:
 - File: `client/index.html` (DOM root container `#root`)
