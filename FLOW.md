@@ -460,11 +460,125 @@
 
 ---
 
-## 2. Planned Application Flows (Phase 3+)
+---
 
-> **Status: PLANNED (Not yet implemented)**
+## 2. Phase 4 Application Flows (Shopping Cart, Checkout, & Order Management)
 
-- Product Management CRUD (`POST /api/products`, `PUT /api/products/:id`, `DELETE /api/products/:id`)
-- Cart Sync Operations (`GET /api/cart`, `POST /api/cart`, `DELETE /api/cart/:id`)
-- Transactional Order Checkout (`POST /api/orders`)
-- Admin Order Management (`GET /api/orders`, `PATCH /api/orders/:id/status`)
+### Flow 10: Authenticated & Guest Cart Operations
+```
+[ User Interaction: Click "Add to Cart" ]
+        |
+        v Check Auth Context (user, token)
+        |
+        +---> If GUEST:
+        |     +---> Read localStorage ('ecommerce_guest_cart')
+        |     +---> Validate requested qty against product stock
+        |     +---> Update local state array & persist back to localStorage ('ecommerce_guest_cart')
+        |     +---> Update totalItemCount & cartTotal in CartContext
+        |
+        +---> If AUTHENTICATED:
+              +---> Call POST /api/cart (Header: Authorization: Bearer <jwt>)
+              |     [ server/src/routes/cart.routes.js ]
+              |             |
+              |             +---> authenticateToken middleware (verifies JWT, populates req.user.userId)
+              |             +---> cart.controller.js (addToCart)
+              |                     |
+              |                     +---> Query product stock: SELECT id, name, price, stock FROM products WHERE id = $1
+              |                     +---> Query existing cart item: SELECT id, quantity FROM cart_items WHERE user_id = $1 AND product_id = $2
+              |                     +---> If item exists: UPSERT new total quantity (capped at product stock)
+              |                     +---> Else: INSERT INTO cart_items (user_id, product_id, quantity)
+              |                     +---> Return HTTP 200 OK with updated cart item
+              +---> Re-fetch fresh cart via GET /api/cart
+              +---> Update CartContext state
+```
+
+### Flow 11: Guest Cart Login Merge Execution
+```
+[ User Action: Submit Login Form ]
+        |
+        v authService.loginUser(email, password)
+        |
+        +---> Server returns HTTP 200 OK with JWT token & User details
+        +---> AuthContext updates token in localStorage and sets user state
+        |
+        v CartContext useEffect detects user login event
+        |
+        +---> Check if localStorage contains 'ecommerce_guest_cart'
+        +---> If items present:
+        |     +---> Iterate through each guest item ({ product_id, quantity })
+        |     +---> Invoke POST /api/cart to merge each item into account database cart
+        |     +---> Server combines quantities up to maximum available stock in PostgreSQL
+        |     +---> Clear 'ecommerce_guest_cart' from localStorage ONLY AFTER merge completes
+        |
+        +---> Fetch updated account database cart via GET /api/cart
+        +---> Update CartContext state with authoritative PostgreSQL cart items
+```
+
+### Flow 12: Transactional Order Checkout Execution
+```
+[ User Action: Submit Checkout Form at /checkout ]
+        |
+        v Call POST /api/orders (Body: { shippingAddress })
+[ server/src/routes/order.routes.js ]
+        |
+        +---> authenticateToken middleware (populates req.user.userId)
+        +---> order.controller.js (createOrder)
+                |
+                +---> Acquire database client: const client = await pool.connect()
+                +---> Execute: await client.query('BEGIN')
+                |
+                +---> Fetch cart items with row locking:
+                |     SELECT c.product_id, c.quantity, p.name, p.price, p.stock
+                |     FROM cart_items c JOIN products p ON c.product_id = p.id
+                |     WHERE c.user_id = $1 FOR UPDATE
+                |
+                +---> Validate cart is not empty & stock for all items >= requested quantity
+                |     (If validation fails: ROLLBACK & return 400 error)
+                |
+                +---> Insert Order record:
+                |     INSERT INTO orders (user_id, total_amount, shipping_address, status)
+                |     VALUES ($1, $2, $3, 'PENDING') RETURNING id
+                |
+                +---> Insert line items & decrement product stock:
+                |     FOR EACH item:
+                |       INSERT INTO order_items (order_id, product_id, quantity, price_at_purchase)
+                |       UPDATE products SET stock = stock - quantity WHERE id = product_id
+                |
+                +---> Clear user's cart:
+                |     DELETE FROM cart_items WHERE user_id = $1
+                |
+                +---> Execute: await client.query('COMMIT')
+                +---> Release database client: client.release()
+                |
+                v Return HTTP 201 Created with order details
+[ client/src/pages/CheckoutPage.jsx ]
+        |
+        +---> Refresh CartContext state (clears cart in UI)
+        +---> Navigate to /order-confirmation/:orderId
+```
+
+### Flow 13: Admin Order Status & Stock Restoration Path
+```
+[ Admin Action: Change Order Status to 'CANCELLED' at /admin/orders ]
+        |
+        v Call PATCH /api/orders/:id/status (Body: { status: 'CANCELLED' })
+[ server/src/routes/order.routes.js ]
+        |
+        +---> authenticateToken middleware
+        +---> requireRole('admin') middleware
+        +---> order.controller.js (updateOrderStatusAdmin)
+                |
+                +---> Check previous order status in DB
+                +---> If changing to CANCELLED from non-cancelled status:
+                |     +---> Acquire database client & BEGIN transaction
+                |     +---> SELECT product_id, quantity FROM order_items WHERE order_id = $1
+                |     +---> FOR EACH item: UPDATE products SET stock = stock + quantity WHERE id = product_id
+                |     +---> UPDATE orders SET status = 'CANCELLED' WHERE id = $1
+                |     +---> COMMIT transaction & release client
+                |
+                +---> Else:
+                      +---> UPDATE orders SET status = $1 WHERE id = $2
+                |
+                v Return HTTP 200 OK with updated order details and stock restoration notification
+```
+

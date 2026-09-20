@@ -1,18 +1,42 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useCart } from '../context/CartContext.jsx';
 
 export default function ProductCard({ product }) {
   const [imageError, setImageError] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(false);
+  const [cardError, setCardError] = useState(null);
+
+  const { addToCart } = useCart();
 
   const fallbackImage = 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80';
-
   const isOutOfStock = Number(product.stock) <= 0;
+
+  const handleAddToCart = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isOutOfStock || adding) return;
+
+    setCardError(null);
+    try {
+      setAdding(true);
+      await addToCart(product, 1);
+      setAdded(true);
+      setTimeout(() => setAdded(false), 2000);
+    } catch (err) {
+      setCardError(err.message);
+      setTimeout(() => setCardError(null), 3000);
+    } finally {
+      setAdding(false);
+    }
+  };
 
   return (
     <div className="group bg-slate-800/60 backdrop-blur-sm border border-slate-700/80 hover:border-indigo-500/50 rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col h-full">
       
       {/* Product Image Container */}
-      <div className="relative aspect-square w-full bg-slate-900/80 overflow-hidden">
+      <Link to={`/products/${product.id}`} className="relative aspect-square w-full bg-slate-900/80 overflow-hidden block">
         <img
           src={imageError || !product.image_url ? fallbackImage : product.image_url}
           alt={product.name}
@@ -40,21 +64,27 @@ export default function ProductCard({ product }) {
             </span>
           )}
         </div>
-      </div>
+      </Link>
 
       {/* Content Section */}
       <div className="p-5 flex flex-col flex-grow justify-between">
         <div>
-          <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-400 transition-colors line-clamp-1">
-            {product.name}
-          </h3>
+          <Link to={`/products/${product.id}`}>
+            <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-400 transition-colors line-clamp-1">
+              {product.name}
+            </h3>
+          </Link>
           <p className="text-slate-400 text-xs mt-1.5 line-clamp-2 leading-relaxed">
             {product.description || 'No description available for this product.'}
           </p>
         </div>
 
-        {/* Price & Action Button */}
-        <div className="mt-5 pt-4 border-t border-slate-700/60 flex items-center justify-between">
+        {cardError && (
+          <p className="text-[11px] text-rose-400 font-semibold mt-2">⚠️ {cardError}</p>
+        )}
+
+        {/* Price & Action Buttons */}
+        <div className="mt-5 pt-4 border-t border-slate-700/60 flex items-center justify-between gap-2">
           <div>
             <span className="text-xs text-slate-400 block font-medium">Price</span>
             <span className="text-xl font-extrabold text-white tracking-tight">
@@ -62,13 +92,29 @@ export default function ProductCard({ product }) {
             </span>
           </div>
 
-          <Link
-            to={`/products/${product.id}`}
-            className="inline-flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-600/20 hover:shadow-indigo-500/40 transition-all duration-200 active:scale-95"
-          >
-            <span>View Details</span>
-            <span>→</span>
-          </Link>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleAddToCart}
+              disabled={isOutOfStock || adding}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 cursor-pointer flex items-center space-x-1 ${
+                added
+                  ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                  : isOutOfStock
+                  ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20'
+              }`}
+            >
+              <span>{added ? '✓ Added' : isOutOfStock ? 'Sold Out' : '🛒 Add'}</span>
+            </button>
+
+            <Link
+              to={`/products/${product.id}`}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold rounded-xl border border-slate-700 transition-all"
+              title="View Details"
+            >
+              ➔
+            </Link>
+          </div>
         </div>
 
       </div>

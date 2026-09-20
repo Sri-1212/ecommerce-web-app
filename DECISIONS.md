@@ -195,3 +195,32 @@ This document details the architectural, technical, and operational design choic
 - **Alternatives considered**: Keeping the fallback store enabled only in development mode, or mocking database queries at the controller level.
 - **Trade-offs**: Local development and integration testing require an active PostgreSQL instance and valid `DATABASE_URL`. If PostgreSQL is unavailable, database queries will throw connection errors handled by the application's error middleware.
 
+---
+
+## 6. Phase 4 Cart, Checkout, and Order Management Decision Log
+
+### Decision 30: Centralized Dual-Mode Cart Management (`CartContext.jsx`)
+- **Context**: Users can browse and add items to cart either as anonymous guests or authenticated account holders.
+- **Why this approach**: Guest items are held in `localStorage` (`ecommerce_guest_cart`), while authenticated items are synced to PostgreSQL `cart_items` table via `/api/cart`.
+- **Alternatives considered**: Mandatory login before adding any item to cart.
+- **Trade-offs**: Requires dual state synchronization logic in `CartContext.jsx`.
+
+### Decision 31: Automatic Guest Cart Login Merge Protocol
+- **Context**: When a guest user logs in with items in `localStorage`, their guest items must be merged into their account database cart.
+- **Why this approach**: On login event, `CartContext` iterates through guest items, posts them to `/api/cart` (combining quantities up to available stock), clears `ecommerce_guest_cart` upon success, and re-fetches the database cart.
+- **Alternatives considered**: Prompting user to discard or overwrite cart.
+- **Trade-offs**: Requires handling edge-case inventory constraints during guest-to-user cart merge.
+
+### Decision 32: Transactional Checkout with Row Locking
+- **Context**: Placing an order must create the order record, save line items, decrement product stock, and clear the user's cart without race conditions.
+- **Why this approach**: `POST /api/orders` acquires a dedicated connection (`pool.connect()`) and wraps operations in `BEGIN ... COMMIT` with `FOR UPDATE` row locks on `products`.
+- **Alternatives considered**: Sequential non-transactional SQL queries.
+- **Trade-offs**: Requires explicit client cleanup (`client.release()`) and `ROLLBACK` on error.
+
+### Decision 33: Automatic Stock Restoration on Order Cancellation
+- **Context**: Admins can update order status via `PATCH /api/orders/:id/status`.
+- **Why this approach**: If an order status changes to `CANCELLED`, a database transaction restores item quantities back to `products.stock`.
+- **Alternatives considered**: Manual inventory adjustments by admins.
+- **Trade-offs**: Requires checking previous status before applying stock adjustments to prevent duplicate restorations.
+
+
