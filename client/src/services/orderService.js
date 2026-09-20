@@ -1,4 +1,10 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const getBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const cleanUrl = envUrl.replace(/\/+$/, '').replace(/\/api$/, '');
+  return `${cleanUrl}/api`;
+};
+
+const API_BASE_URL = getBaseUrl();
 
 /**
  * Helper to construct authorization headers
