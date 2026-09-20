@@ -183,3 +183,15 @@ This document details the architectural, technical, and operational design choic
 - **Alternatives considered**: Returning plain text strings or variable JSON keys.
 - **Why this approach**: All endpoints return uniform `{ status: 'error', statusCode: N, message: '...' }` payloads, enabling frontend services and components to render clean `ErrorMessage` components.
 - **Trade-offs**: Requires disciplined response formatting across all controller handlers.
+
+---
+
+## 5. Phase 3 Database Correction Decision Log (PostgreSQL Single Source of Truth)
+
+### Decision 29: PostgreSQL as Single Source of Truth (Removal of In-Memory Fallback)
+- **Context**: The database module (`server/src/config/db.js`) previously contained an in-memory JavaScript fallback object (`inMemoryStore`) with simulated SQL pattern matching for local testing without a live PostgreSQL instance.
+- **Why this approach**: Retaining an in-memory fake database creates silent behavior divergence between local development and production environments, masks actual database connectivity failures, and risks state loss upon server restart. PostgreSQL must be the actual database of record for all REST endpoints (`Controller -> query() -> PostgreSQL Pool -> PostgreSQL`).
+- **Why previous fallback was removed**: The silently degrading in-memory fallback obscured PostgreSQL integration failures and allowed endpoints to succeed on mock state when PostgreSQL was disconnected. Removing it guarantees that database connectivity and SQL behavior are tested against real PostgreSQL instances.
+- **Alternatives considered**: Keeping the fallback store enabled only in development mode, or mocking database queries at the controller level.
+- **Trade-offs**: Local development and integration testing require an active PostgreSQL instance and valid `DATABASE_URL`. If PostgreSQL is unavailable, database queries will throw connection errors handled by the application's error middleware.
+

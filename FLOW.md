@@ -51,7 +51,7 @@
         v Function: getAllProducts(req, res, next)
         |
         +---> Queries DB via query(): SELECT id, name, description, price, image_url, category, stock, created_at, updated_at FROM products ORDER BY id DESC
-        +---> PostgreSQL / Fallback Store returns row array
+        +---> PostgreSQL Pool executes query and returns row array
         +---> Responds with HTTP 200 OK { status: 'success', data: { products } }
 [ client/src/pages/ProductsPage.jsx ]
         |
