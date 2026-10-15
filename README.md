@@ -34,7 +34,7 @@ This repository contains the complete source code for the frontend and backend o
 ## Tech Stack
 
 ### Frontend
-
+- css
 - React
 - Vite
 - Tailwind CSS
