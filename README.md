@@ -38,7 +38,7 @@ This repository contains the complete source code for the frontend and backend o
 - React
 - Vite
 - Tailwind CSS
-- React Router
+- React Routerr
 
 ### Backend
 
