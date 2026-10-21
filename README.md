@@ -58,4 +58,4 @@ This repository contains the complete source code for the frontend and backend o
 - **Vercel** — Frontend
 - **Render** — Backend
 - **Supabase** — Databaseeeee
-ss
+ssS
